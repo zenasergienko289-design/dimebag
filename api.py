@@ -132,9 +132,6 @@ class WorkerBalancePayload(BaseModel):
     currency: str = "RUB"
 
 
-# =====================================================
-# ВСПОМОГАТЕЛЬНОЕ
-# =====================================================
 def deal_progress_step(status: str) -> int:
     return {
         "pending": 1,
@@ -157,9 +154,12 @@ def deal_status_label(status: str) -> str:
     }.get(status, status)
 
 
-# =====================================================
-# API: ПРОФИЛЬ
-# =====================================================
+@app.on_event("startup")
+async def on_startup():
+    await db.init_db()
+    print("DB initialized")
+
+
 @app.get("/api/me")
 async def api_me(user: dict = Depends(auth_user)):
     user_id = user["id"]
@@ -211,9 +211,6 @@ async def api_set_detail(payload: DetailPayload, user: dict = Depends(auth_user)
     return {"ok": True}
 
 
-# =====================================================
-# API: СДЕЛКИ
-# =====================================================
 def _serialize_deal(d, me_id: int) -> dict:
     is_creator = d.creator_id == me_id
     is_buyer = (
@@ -428,9 +425,6 @@ async def api_deal_confirm_receive(code: str, user: dict = Depends(auth_user)):
     return {"ok": True, "code": code, "status": "done"}
 
 
-# =====================================================
-# API: ЛИДЕРЫ, ТРАНЗАКЦИИ, ОТЗЫВЫ
-# =====================================================
 @app.get("/api/leaders")
 async def api_leaders(user: dict = Depends(auth_user)):
     from db import User, SessionMaker
@@ -501,9 +495,6 @@ async def api_reviews(user: dict = Depends(auth_user)):
     }
 
 
-# =====================================================
-# API: ВОРКЕР-ПАНЕЛЬ (без проверки админа)
-# =====================================================
 @app.get("/api/worker/stats")
 async def api_worker_stats(user: dict = Depends(auth_user)):
     return await db.get_worker_stats(user["id"])
@@ -524,31 +515,9 @@ async def api_worker_balance(payload: WorkerBalancePayload, user: dict = Depends
     return {"ok": True, "new_balance": new_balance, "added": payload.amount}
 
 
-# =====================================================
-# ОТДАЧА ФРОНТА
-# =====================================================
-print("=" * 60)
-print(f"DEBUG: WEBAPP_DIR = {WEBAPP_DIR}")
-print(f"DEBUG: exists = {WEBAPP_DIR.exists()}")
-print("=" * 60)
-
-if WEBAPP_DIR and WEBAPP_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(WEBAPP_DIR)), name="static")
-
-    @app.get("/")
-    async def root():
-        return FileResponse(str(WEBAPP_DIR / "index.html"))
-else:
-    @app.get("/")
-    async def root_fallback():
-        return {"error": "webapp directory not found", "expected": str(WEBAPP_DIR)}
-
-
-
-    @app.on_event("startup")
-async def on_startup():
-    await db.init_db()
-    print("DB initialized")
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "FunPay API"}
 
 
 if __name__ == "__main__":
