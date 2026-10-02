@@ -545,9 +545,14 @@ else:
 
 
 
-    if __name__ == "__main__":
-        import uvicorn
-        import os
+    @app.on_event("startup")
+async def on_startup():
+    await db.init_db()
+    print("DB initialized")
 
-        port = int(os.getenv("PORT", 3000))
-        uvicorn.run(app, host="0.0.0.0", port=port)
+
+if __name__ == "__main__":
+    import uvicorn
+    import os
+    port = int(os.getenv("PORT", 3000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
