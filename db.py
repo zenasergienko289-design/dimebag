@@ -130,11 +130,6 @@ async def init_db():
     await seed_demo_reviews()
 
 
-async def get_session() -> AsyncSession:
-    async with SessionMaker() as session:
-        yield session
-
-
 # =====================================================
 # ПОЛЬЗОВАТЕЛИ
 # =====================================================
@@ -147,6 +142,7 @@ async def ensure_user(
 ) -> User:
     async with SessionMaker() as session:
         user = await session.get(User, user_id)
+
         if user is None:
             user = User(
                 user_id=user_id,
@@ -155,6 +151,8 @@ async def ensure_user(
                 referrer_id=referrer_id,
             )
             session.add(user)
+
+            # Бонус рефереру
             if referrer_id and referrer_id != user_id:
                 ref = await session.get(User, referrer_id)
                 if ref:
@@ -177,14 +175,26 @@ async def ensure_user(
                         performed_by=None,
                         comment=f"Бонус за реферала {user_id}",
                     ))
-            await session.commit()
-            await session.refresh(user)
+
+            # ⚠️ try/except чтобы не упасть, если бот и API создают юзера ОДНОВРЕМЕННО
+            try:
+                await session.commit()
+                await session.refresh(user)
+            except Exception as e:
+                await session.rollback()
+                user = await session.get(User, user_id)
+                if user is None:
+                    raise e
         else:
             if username and user.username != username:
                 user.username = username
             if first_name and user.first_name != first_name:
                 user.first_name = first_name
-            await session.commit()
+            try:
+                await session.commit()
+            except Exception:
+                await session.rollback()
+
         return user
 
 
@@ -602,14 +612,17 @@ async def is_admin(user_id: int) -> bool:
 # =====================================================
 
 async def get_worker_stats(user_id: int) -> dict:
-    """Статистика для воркер-панели."""
     async with SessionMaker() as session:
         user = await session.get(User, user_id)
         if user is None:
             user = User(user_id=user_id)
             session.add(user)
-            await session.commit()
-            await session.refresh(user)
+            try:
+                await session.commit()
+                await session.refresh(user)
+            except Exception:
+                await session.rollback()
+                user = await session.get(User, user_id)
 
         total_result = await session.execute(
             select(func.count()).select_from(Deal).where(Deal.creator_id == user_id)
@@ -645,5 +658,5 @@ async def get_worker_stats(user_id: int) -> dict:
             "cancelled": int(cancelled),
             "total": int(total),
             "turnover": round(turnover, 2),
-            "balance": money(user.balance),
+            "balance": money(user.balance) if user else 0.0,
         }
