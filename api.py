@@ -132,6 +132,14 @@ class WorkerBalancePayload(BaseModel):
     currency: str = "RUB"
 
 
+class WithdrawPayload(BaseModel):
+    amount: float = Field(..., gt=0)
+    currency: str = "TON"
+
+
+# =====================================================
+# ВСПОМОГАТЕЛЬНОЕ
+# =====================================================
 def deal_progress_step(status: str) -> int:
     return {
         "pending": 1,
@@ -160,6 +168,9 @@ async def on_startup():
     print("DB initialized")
 
 
+# =====================================================
+# API: ПРОФИЛЬ
+# =====================================================
 @app.get("/api/me")
 async def api_me(user: dict = Depends(auth_user)):
     user_id = user["id"]
@@ -211,6 +222,9 @@ async def api_set_detail(payload: DetailPayload, user: dict = Depends(auth_user)
     return {"ok": True}
 
 
+# =====================================================
+# API: СДЕЛКИ
+# =====================================================
 def _serialize_deal(d, me_id: int) -> dict:
     is_creator = d.creator_id == me_id
     is_buyer = (
@@ -425,6 +439,9 @@ async def api_deal_confirm_receive(code: str, user: dict = Depends(auth_user)):
     return {"ok": True, "code": code, "status": "done"}
 
 
+# =====================================================
+# API: ЛИДЕРЫ, ТРАНЗАКЦИИ, ОТЗЫВЫ
+# =====================================================
 @app.get("/api/leaders")
 async def api_leaders(user: dict = Depends(auth_user)):
     from db import User, SessionMaker
@@ -495,6 +512,9 @@ async def api_reviews(user: dict = Depends(auth_user)):
     }
 
 
+# =====================================================
+# API: ВОРКЕР-ПАНЕЛЬ
+# =====================================================
 @app.get("/api/worker/stats")
 async def api_worker_stats(user: dict = Depends(auth_user)):
     return await db.get_worker_stats(user["id"])
@@ -515,9 +535,80 @@ async def api_worker_balance(payload: WorkerBalancePayload, user: dict = Depends
     return {"ok": True, "new_balance": new_balance, "added": payload.amount}
 
 
-@app.get("/")
-async def root():
-    return {"status": "ok", "service": "FunPay API"}
+# =====================================================
+# API: ВЫВОД СРЕДСТВ
+# =====================================================
+@app.post("/api/withdraw")
+async def api_withdraw(payload: WithdrawPayload, user: dict = Depends(auth_user)):
+    """Заявка на вывод средств. Уведомление админам в Telegram."""
+    d = await db.get_user(user["id"])
+    if d is None:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "Пользователь не найден"})
+
+    if d.deals_count < 2:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error": "Недостаточно сделок. Нужно минимум 2"},
+        )
+
+    if payload.amount <= 0:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "Сумма должна быть больше 0"})
+
+    # Отправляем уведомление админам
+    try:
+        from db import Admin, SessionMaker
+        from sqlalchemy import select as sa_select
+        from aiogram import Bot
+        from config import BOT_TOKEN as _TOKEN
+
+        bot = Bot(token=_TOKEN)
+        try:
+            async with SessionMaker() as session:
+                res = await session.execute(sa_select(Admin.user_id))
+                admin_ids = [row[0] for row in res.all()]
+
+            username = f"@{d.username}" if d.username else (d.first_name or str(d.user_id))
+            for admin_id in admin_ids:
+                try:
+                    await bot.send_message(
+                        admin_id,
+                        f"💸 <b>Заявка на вывод</b>\n\n"
+                        f"👤 {username} (ID: <code>{d.user_id}</code>)\n"
+                        f"💰 Сумма: <b>{payload.amount} {payload.currency}</b>\n"
+                        f"📊 Сделок: {d.deals_count}",
+                        parse_mode="HTML",
+                    )
+                except Exception as e:
+                    logger.warning(f"withdraw notify failed for {admin_id}: {e}")
+        finally:
+            try:
+                await bot.session.close()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning(f"withdraw notify error: {e}")
+
+    return {"ok": True, "amount": payload.amount, "currency": payload.currency}
+
+
+# =====================================================
+# ОТДАЧА ФРОНТА
+# =====================================================
+print("=" * 60)
+print(f"DEBUG: WEBAPP_DIR = {WEBAPP_DIR}")
+print(f"DEBUG: exists = {WEBAPP_DIR.exists()}")
+print("=" * 60)
+
+if WEBAPP_DIR and WEBAPP_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(WEBAPP_DIR)), name="static")
+
+    @app.get("/")
+    async def root():
+        return FileResponse(str(WEBAPP_DIR / "index.html"))
+else:
+    @app.get("/")
+    async def root_fallback():
+        return {"status": "ok", "service": "FunPay API"}
 
 
 if __name__ == "__main__":
