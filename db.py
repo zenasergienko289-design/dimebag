@@ -8,6 +8,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy import (
     BigInteger, String, Float, Integer, DateTime, Text, select, func
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncSession, async_sessionmaker, create_async_engine
 )
@@ -130,6 +131,11 @@ async def init_db():
     await seed_demo_reviews()
 
 
+async def get_session() -> AsyncSession:
+    async with SessionMaker() as session:
+        yield session
+
+
 # =====================================================
 # ПОЛЬЗОВАТЕЛИ
 # =====================================================
@@ -142,59 +148,60 @@ async def ensure_user(
 ) -> User:
     async with SessionMaker() as session:
         user = await session.get(User, user_id)
-
-        if user is None:
-            user = User(
-                user_id=user_id,
-                username=username,
-                first_name=first_name,
-                referrer_id=referrer_id,
-            )
-            session.add(user)
-
-            # Бонус рефереру
-            if referrer_id and referrer_id != user_id:
-                ref = await session.get(User, referrer_id)
-                if ref:
-                    old = money(ref.balance)
-                    ref.balance = money(old + 50.0)
-                    ref.referrals_count += 1
-                    session.add(Transaction(
-                        user_id=referrer_id,
-                        amount=50.0,
-                        currency="RUB",
-                        type="referral",
-                        comment=f"Бонус за реферала {user_id}",
-                    ))
-                    session.add(BalanceHistory(
-                        user_id=referrer_id,
-                        old_balance=old,
-                        amount=50.0,
-                        new_balance=ref.balance,
-                        op_type="referral",
-                        performed_by=None,
-                        comment=f"Бонус за реферала {user_id}",
-                    ))
-
-            # ⚠️ try/except чтобы не упасть, если бот и API создают юзера ОДНОВРЕМЕННО
-            try:
-                await session.commit()
-                await session.refresh(user)
-            except Exception as e:
-                await session.rollback()
-                user = await session.get(User, user_id)
-                if user is None:
-                    raise e
-        else:
+        if user is not None:
+            changed = False
             if username and user.username != username:
                 user.username = username
+                changed = True
             if first_name and user.first_name != first_name:
                 user.first_name = first_name
-            try:
+                changed = True
+            if changed:
                 await session.commit()
-            except Exception:
-                await session.rollback()
+            return user
 
+        # Пробуем создать нового
+        user = User(
+            user_id=user_id,
+            username=username,
+            first_name=first_name,
+            referrer_id=referrer_id,
+        )
+        session.add(user)
+        try:
+            await session.flush()
+        except IntegrityError:
+            await session.rollback()
+            user = await session.get(User, user_id)
+            if user is None:
+                raise
+            return user
+
+        if referrer_id and referrer_id != user_id:
+            ref = await session.get(User, referrer_id)
+            if ref:
+                old = money(ref.balance)
+                ref.balance = money(old + 50.0)
+                ref.referrals_count += 1
+                session.add(Transaction(
+                    user_id=referrer_id,
+                    amount=50.0,
+                    currency="RUB",
+                    type="referral",
+                    comment=f"Бонус за реферала {user_id}",
+                ))
+                session.add(BalanceHistory(
+                    user_id=referrer_id,
+                    old_balance=old,
+                    amount=50.0,
+                    new_balance=ref.balance,
+                    op_type="referral",
+                    performed_by=None,
+                    comment=f"Бонус за реферала {user_id}",
+                ))
+
+        await session.commit()
+        await session.refresh(user)
         return user
 
 
@@ -532,24 +539,69 @@ async def finish_deal(code: str) -> Optional[Deal]:
 # =====================================================
 
 DEMO_REVIEWS = [
-    {"username": "Dunay", "stars": 4, "text": "Все быстро, только не было 25 звёзд на передачу", "days_ago": 12},
-    {"username": "Swim1x", "stars": 5, "text": "Прекрасно, вывел деньги моментально.", "days_ago": 8},
-    {"username": "kirill_fx", "stars": 5, "text": "Сделка прошла без сюрпризов, менеджер на связи.", "days_ago": 3},
-    {"username": "masha.r", "stars": 5, "text": "Удобно, всё понятно с первого раза.", "days_ago": 5},
-    {"username": "ton_trader", "stars": 4, "text": "Норм, чуть долго ждал подтверждение оплаты.", "days_ago": 7},
-    {"username": "AlexGifts", "stars": 5, "text": "Вывел на карту за 10 минут. Рекомендую.", "days_ago": 2},
-    {"username": "nightowl", "stars": 3, "text": "Работает, но интерфейс местами запутанный.", "days_ago": 15},
-    {"username": "VeraK", "stars": 5, "text": "Первая сделка — всё ок, бонус приятный.", "days_ago": 1},
-    {"username": "crypto_lev", "stars": 4, "text": "Быстро, но хотелось бы больше валют в одном экране.", "days_ago": 9},
-    {"username": "sasha_pro", "stars": 5, "text": "Отлично. Подарок дошёл, деньги на балансе.", "days_ago": 4},
+    # ---------- 5 звёзд (40) ----------
+    {"username": "mikhail_t",  "stars": 5, "text": "Всё чётко, сделка прошла за 5 минут. Продавец быстро передал подарок в банк. Рекомендую!", "days_ago": 1},
+    {"username": "nastyusha",  "stars": 5, "text": "Первый раз пользовалась, всё понятно и безопасно. Деньги пришли моментально.", "days_ago": 1},
+    {"username": "dimon_228",  "stars": 5, "text": "Банк @FunPayVault реально топ. Никакого кидалова, всё по правилам.", "days_ago": 2},
+    {"username": "katya_k",    "stars": 5, "text": "Спасибо огромное! Купила подарок дешевле, чем у перекупов, и без риска.", "days_ago": 2},
+    {"username": "artem_pro",  "stars": 5, "text": "Сделку закрыли быстро, поддержка отвечает моментально. 5 из 5.", "days_ago": 2},
+    {"username": "lera_star",  "stars": 5, "text": "Очень удобно, что можно торговать прямо в Telegram. Всё автоматизировано.", "days_ago": 3},
+    {"username": "vlad_ok",    "stars": 5, "text": "Продал два подарка — оба раза деньги пришли без задержек. Доволен.", "days_ago": 3},
+    {"username": "sasha_m",    "stars": 5, "text": "Никаких проблем, комиссия копеечная. Буду пользоваться ещё.", "days_ago": 3},
+    {"username": "ilya_2000",  "stars": 5, "text": "Сначала боялся, но всё оказалось честно. Эскроу работает как надо.", "days_ago": 4},
+    {"username": "olga_v",     "stars": 5, "text": "Спасибо менеджеру за помощь! Разобралась с выводом за минуту.", "days_ago": 4},
+    {"username": "kirill_x",   "stars": 5, "text": "Быстро, безопасно, удобно. Лучший сервис для сделок с подарками.", "days_ago": 4},
+    {"username": "masha_love", "stars": 5, "text": "Продала NFT-подарок, покупатель получил, я получила деньги. Всё чётко.", "days_ago": 5},
+    {"username": "stepan_k",   "stars": 5, "text": "Пользуюсь месяц — ни одной проблемы. Рекомендую всем друзьям.", "days_ago": 5},
+    {"username": "anya_sun",   "stars": 5, "text": "Очень понравилось, что есть защита от мошенников. Чувствую себя в безопасности.", "days_ago": 5},
+    {"username": "roman_777",  "stars": 5, "text": "Сделка на 3000 руб прошла без сучка и задоринки. Спасибо!", "days_ago": 6},
+    {"username": "yulia_k",    "stars": 5, "text": "Все быстро, поддержка вежливая. Уже третья сделка через этот сервис.", "days_ago": 6},
+    {"username": "maxim_d",    "stars": 5, "text": "Реально удобно — не надо никуда переходить, всё в телеге.", "days_ago": 6},
+    {"username": "vika_star",  "stars": 5, "text": "Продавец передал подарок в банк за 2 минуты. Деньги ушли сразу после подтверждения.", "days_ago": 7},
+    {"username": "anton_p",    "stars": 5, "text": "Крутой сервис, всё прозрачно. Комиссия 1% — это ничто.", "days_ago": 7},
+    {"username": "dasha_m",    "stars": 5, "text": "Очень довольна! Купила редкий подарок без риска быть обманутой.", "days_ago": 7},
+    {"username": "gleb_t",     "stars": 5, "text": "Спасибо за сделку! Всё прошло гладко, рекомендую.", "days_ago": 8},
+    {"username": "nina_k",     "stars": 5, "text": "Быстро отвечает поддержка, всё решают. Плюсую.", "days_ago": 8},
+    {"username": "pavel_z",    "stars": 5, "text": "Сделал первую сделку — получил бонус новичка. Приятно!", "days_ago": 8},
+    {"username": "sonya_a",    "stars": 5, "text": "Идеально для тех, кто боится кидалова. Эскроу решает.", "days_ago": 9},
+    {"username": "timur_k",    "stars": 5, "text": "Хороший сервис, пользуюсь постоянно. Ни разу не подвели.", "days_ago": 9},
+    {"username": "alina_b",    "stars": 5, "text": "Всё понравилось, деньги пришли моментально. Спасибо!", "days_ago": 9},
+    {"username": "egor_s",     "stars": 5, "text": "Продал подарок, покупатель доволен, я тоже. Что ещё нужно?", "days_ago": 10},
+    {"username": "marina_v",   "stars": 5, "text": "Очень удобный интерфейс, разберётся даже новичок.", "days_ago": 10},
+    {"username": "denis_ok",   "stars": 5, "text": "Сделка прошла за 3 минуты. Быстрее, чем я ожидал.", "days_ago": 10},
+    {"username": "liza_m",     "stars": 5, "text": "Спасибо за безопасность! Наконец-то можно не бояться обмана.", "days_ago": 11},
+    {"username": "igor_n",     "stars": 5, "text": "Отличный сервис, пользуюсь уже полгода. Всё стабильно.", "days_ago": 11},
+    {"username": "kristina_p", "stars": 5, "text": "Продала три подарка, все сделки успешные. Довольна как слон.", "days_ago": 11},
+    {"username": "vasya_k",    "stars": 5, "text": "Быстро, чётко, без воды. Рекомендую всем.", "days_ago": 12},
+    {"username": "nastya_r",   "stars": 5, "text": "Первый раз — и сразу всё получилось. Спасибо поддержке!", "days_ago": 12},
+    {"username": "andrey_t",   "stars": 5, "text": "Хорошая альтернатива перекупам. Комиссия низкая, всё честно.", "days_ago": 12},
+    {"username": "sofia_l",    "stars": 5, "text": "Очень рада, что нашла этот сервис. Теперь только здесь.", "days_ago": 13},
+    {"username": "vova_m",     "stars": 5, "text": "Сделка на 5000 руб — всё ок. Деньги пришли быстро.", "days_ago": 13},
+    {"username": "zhenya_s",   "stars": 5, "text": "Классный сервис, всё автоматизировано. Респект разработчикам.", "days_ago": 13},
+    {"username": "katya_p",    "stars": 5, "text": "Продала подарок за 10 минут. Покупатель сразу подтвердил.", "days_ago": 14},
+    {"username": "ilya_m",     "stars": 5, "text": "Спасибо! Всё чётко, буду пользоваться ещё.", "days_ago": 14},
+
+    # ---------- 4 звезды (10) ----------
+    {"username": "artem_k",    "stars": 4, "text": "Всё хорошо, но хотелось бы больше способов вывода. В остальном — топ.", "days_ago": 2},
+    {"username": "lera_v",     "stars": 4, "text": "Сделка прошла нормально, но поддержка ответила не сразу. В целом довольна.", "days_ago": 4},
+    {"username": "dima_x",     "stars": 4, "text": "Хороший сервис, но интерфейс местами непонятный. Пришлось разбираться.", "days_ago": 5},
+    {"username": "olga_p",     "stars": 4, "text": "Всё честно, но комиссия могла быть и меньше. В остальном — ок.", "days_ago": 7},
+    {"username": "kirill_m",   "stars": 4, "text": "Работает как надо, но иногда подвисает мини-апп. Не критично.", "days_ago": 8},
+    {"username": "masha_k",    "stars": 4, "text": "Сделку закрыли, деньги пришли. Минус звезда за медленную загрузку.", "days_ago": 9},
+    {"username": "stepan_v",   "stars": 4, "text": "В целом доволен, но хотелось бы больше валют для вывода.", "days_ago": 10},
+    {"username": "anya_p",     "stars": 4, "text": "Нормальный сервис, но первый раз было сложно разобраться.", "days_ago": 11},
+    {"username": "roman_z",    "stars": 4, "text": "Всё ок, но уведомления иногда приходят с задержкой.", "days_ago": 12},
+    {"username": "yulia_s",    "stars": 4, "text": "Хорошо, но хотелось бы бонусов побольше. В остальном — рекомендую.", "days_ago": 14},
 ]
 
 
 async def seed_demo_reviews() -> None:
     async with SessionMaker() as session:
-        count = await session.scalar(select(func.count()).select_from(Review))
-        if count and count > 0:
-            return
+        old = await session.execute(select(Review).where(Review.is_demo == 1))
+        for r in old.scalars().all():
+            await session.delete(r)
+        await session.commit()
+
         now = datetime.utcnow()
         for item in DEMO_REVIEWS:
             session.add(Review(
@@ -617,46 +669,8 @@ async def get_worker_stats(user_id: int) -> dict:
         if user is None:
             user = User(user_id=user_id)
             session.add(user)
-            try:
-                await session.commit()
-                await session.refresh(user)
-            except Exception:
-                await session.rollback()
-                user = await session.get(User, user_id)
+            await session.commit()
+            await session.refresh(user)
 
         total_result = await session.execute(
-            select(func.count()).select_from(Deal).where(Deal.creator_id == user_id)
-        )
-        total = total_result.scalar() or 0
-
-        done_result = await session.execute(
-            select(func.count()).select_from(Deal).where(
-                (Deal.creator_id == user_id) & (Deal.status == "done")
-            )
-        )
-        done = done_result.scalar() or 0
-
-        cancelled_result = await session.execute(
-            select(func.count()).select_from(Deal).where(
-                (Deal.creator_id == user_id) & (Deal.status == "cancelled")
-            )
-        )
-        cancelled = cancelled_result.scalar() or 0
-
-        success = done
-
-        turnover_result = await session.execute(
-            select(func.sum(Deal.amount)).where(
-                (Deal.creator_id == user_id) & (Deal.status == "done")
-            )
-        )
-        turnover = float(turnover_result.scalar() or 0)
-
-        return {
-            "success": int(success),
-            "done": int(done),
-            "cancelled": int(cancelled),
-            "total": int(total),
-            "turnover": round(turnover, 2),
-            "balance": money(user.balance) if user else 0.0,
-        }
+            select(func.count()).select_from(Deal).where(Deal.
