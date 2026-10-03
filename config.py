@@ -6,7 +6,6 @@ from pathlib import Path
 # =====================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Постоянная папка (BotHost создаёт её и она не стирается)
 DATA_DIR = os.getenv("DATA_DIR", "/app/data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -18,11 +17,11 @@ WEBAPP_DIR = Path(BASE_DIR).parent / "webapp"
 # =====================================================
 # БОТ
 # =====================================================
-BOT_TOKEN = "8886426256:AAHJhNYZXnDhj3K68E5RHacEIJgG830_c4Q"
-BOT_USERNAME = "papagaratbot"
+BOT_TOKEN = "8937795556:AAGuQE_VtkwVAkQXbjaKNhnG3DOAvlxUvig"
+BOT_USERNAME = "Fun8Pay_bot"
 
-MANAGER_USER = "RelayerForGifts"
-HELPER_USER = "RelayerForGifts"
+MANAGER_USER = "Gifts_Bankings"
+HELPER_USER = "Gifts_Bankings"
 SUPPORT_LINK = f"https://t.me/{MANAGER_USER}"
 
 # =====================================================
