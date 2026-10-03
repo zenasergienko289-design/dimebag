@@ -536,19 +536,26 @@ async def api_worker_balance(payload: WorkerBalancePayload, user: dict = Depends
 
 
 # =====================================================
-# API: ВЫВОД СРЕДСТВ
+# API: ВЫВОД СРЕДСТВ (прогрессивное требование)
 # =====================================================
 @app.post("/api/withdraw")
 async def api_withdraw(payload: WithdrawPayload, user: dict = Depends(auth_user)):
-    """Заявка на вывод средств. Уведомление админам в Telegram."""
+    """Заявка на вывод. Логика: 0 сделок → от 1, 1 сделка → от 2, 2+ → вывод."""
     d = await db.get_user(user["id"])
     if d is None:
         return JSONResponse(status_code=400, content={"ok": False, "error": "Пользователь не найден"})
 
+    # ⚠️ ПРОГРЕССИВНОЕ ТРЕБОВАНИЕ
+    if d.deals_count < 1:
+        return JSONResponse(
+            status_code=400,
+            content={"ok": False, "error": "Вывод доступен от 1 сделки"},
+        )
+
     if d.deals_count < 2:
         return JSONResponse(
             status_code=400,
-            content={"ok": False, "error": "Недостаточно сделок. Нужно минимум 2"},
+            content={"ok": False, "error": "Вывод доступен от 2 сделок"},
         )
 
     if payload.amount <= 0:
