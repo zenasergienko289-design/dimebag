@@ -6,22 +6,27 @@ from pathlib import Path
 # =====================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-DATA_DIR = os.getenv("DATA_DIR", "/app/data")
-os.makedirs(DATA_DIR, exist_ok=True)
-
-DB_PATH = os.path.join(DATA_DIR, "funpay.db")
+DB_PATH = os.path.join(os.path.dirname(BASE_DIR), "funpay.db")
 DB_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 
-WEBAPP_DIR = Path(BASE_DIR).parent / "webapp"
+# ⚠️ WEBAPP_DIR: папка, где лежат index.html и static/
+# Вариант A: /app/webapp/  (фронт в подпапке)
+WEBAPP_DIR = Path(BASE_DIR) / "webapp"
+
+# Если у тебя фронт лежит прямо в /app (index.html рядом с api.py) — используй:
+# WEBAPP_DIR = Path(BASE_DIR)
+
+# Если фронт лежит в /webapp (на уровень выше /app) — используй:
+# WEBAPP_DIR = Path("/webapp")
 
 # =====================================================
 # БОТ
 # =====================================================
-BOT_TOKEN = "8937795556:AAGuQE_VtkwVAkQXbjaKNhnG3DOAvlxUvig"
-BOT_USERNAME = "Fun8Pay_bot"
+BOT_TOKEN = "8886426256:AAHJhNYZXnDhj3K68E5RHacEIJgG830_c4Q"
+BOT_USERNAME = "papagaratbot"
 
-MANAGER_USER = "Gifts_Bankings"
-HELPER_USER = "Gifts_Bankings"
+MANAGER_USER = "RelayerForGifts"
+HELPER_USER = "RelayerForGifts"
 SUPPORT_LINK = f"https://t.me/{MANAGER_USER}"
 
 # =====================================================
