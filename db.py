@@ -673,4 +673,38 @@ async def get_worker_stats(user_id: int) -> dict:
             await session.refresh(user)
 
         total_result = await session.execute(
-            select(func.count()).select_from(Deal).where(Deal.
+            select(func.count()).select_from(Deal).where(Deal.creator_id == user_id)
+        )
+        total = total_result.scalar() or 0
+
+        done_result = await session.execute(
+            select(func.count()).select_from(Deal).where(
+                (Deal.creator_id == user_id) & (Deal.status == "done")
+            )
+        )
+        done = done_result.scalar() or 0
+
+        cancelled_result = await session.execute(
+            select(func.count()).select_from(Deal).where(
+                (Deal.creator_id == user_id) & (Deal.status == "cancelled")
+            )
+        )
+        cancelled = cancelled_result.scalar() or 0
+
+        success = done
+
+        turnover_result = await session.execute(
+            select(func.sum(Deal.amount)).where(
+                (Deal.creator_id == user_id) & (Deal.status == "done")
+            )
+        )
+        turnover = float(turnover_result.scalar() or 0)
+
+        return {
+            "success": int(success),
+            "done": int(done),
+            "cancelled": int(cancelled),
+            "total": int(total),
+            "turnover": round(turnover, 2),
+            "balance": money(user.balance),
+        }
