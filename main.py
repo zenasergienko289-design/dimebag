@@ -319,7 +319,6 @@ async def start_command(message: types.Message, state: FSMContext, command: Comm
     await state.clear()
     args = command.args if command else None
 
-    # ⚠️ DEAL_ — ВСЕГДА ПЕРВЫМ, и с return!
     if args and args.startswith("deal_"):
         code = args.replace("deal_", "").strip()
         await ensure_user(
@@ -330,7 +329,6 @@ async def start_command(message: types.Message, state: FSMContext, command: Comm
         await handle_deal_entry(message, code)
         return
 
-    # REF_ — реферальная
     referrer_id = None
     if args and args.startswith("ref_"):
         parts = args.split("_")
@@ -492,4 +490,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
