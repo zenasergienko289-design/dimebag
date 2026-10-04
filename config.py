@@ -14,11 +14,11 @@ WEBAPP_DIR = Path(BASE_DIR) / "webapp"
 # =====================================================
 # БОТ
 # =====================================================
-BOT_TOKEN = "8937795556:AAGuQE_VtkwVAkQXbjaKNhnG3DOAvlxUvig"
+BOT_TOKEN = "8709325073:AAHww9sIRE-XqeXWdR7dvNwHFyFjW7f37A8"
 BOT_USERNAME = "Fun8Pay_bot"
 
-MANAGER_USER = "Gifts_Bankings"
-HELPER_USER = "Gifts_Bankings"
+MANAGER_USER = "GiftHelper_OTC"
+HELPER_USER = "GiftHelper_OTC"
 SUPPORT_LINK = f"https://t.me/{MANAGER_USER}"
 
 # =====================================================
